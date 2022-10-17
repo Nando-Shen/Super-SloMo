@@ -48,7 +48,7 @@ class ATD12k(Dataset):
 
     def __getitem__(self, index):
 
-        imgpaths = [self.data_list[index][0], self.data_list[index][1], self.data_list[index][2], self.data_list[index][3]]
+        imgpaths = [self.data_list[index][0], self.data_list[index][1], self.data_list[index][2]]
 
         # Load images
         images = [Image.open(pth) for pth in imgpaths]
