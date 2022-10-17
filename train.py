@@ -190,7 +190,7 @@ def validate():
             psnr += (10 * log10(1 / MSE_val.item()))
 
             #ssim
-            ssim += ssim_matlab(IFrame.unsqueeze(0).clamp(0, 1), Ft_p.unsqueeze(0).clamp(0, 1), val_range=1.)
+            ssim += ssim_matlab(IFrame.clamp(0, 1), Ft_p.clamp(0, 1), val_range=1.)
 
             
     return (psnr / len(validationloader)), (ssim / len(validationloader)), (tloss / len(validationloader)), retImg
