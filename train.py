@@ -67,13 +67,17 @@ normalize = transforms.Normalize(mean=mean,
                                  std=std)
 transform = transforms.Compose([transforms.ToTensor(), normalize])
 
-trainset = dataloader.SuperSloMo(root=args.dataset_root + '/train', transform=transform, train=True)
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.train_batch_size, shuffle=True)
+# trainset = dataloader.SuperSloMo(root=args.dataset_root + '/train', transform=transform, train=True)
+# trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.train_batch_size, shuffle=True)
+#
+# validationset = dataloader.SuperSloMo(root=args.dataset_root + '/validation', transform=transform, randomCropSize=(640, 352), train=False)
+# validationloader = torch.utils.data.DataLoader(validationset, batch_size=args.validation_batch_size, shuffle=False)
 
-validationset = dataloader.SuperSloMo(root=args.dataset_root + '/validation', transform=transform, randomCropSize=(640, 352), train=False)
-validationloader = torch.utils.data.DataLoader(validationset, batch_size=args.validation_batch_size, shuffle=False)
+from data.atd12k import get_loader
+trainloader = get_loader('train', args.dataset_root, args.batch_size, shuffle=True)
+validationloader = get_loader('test', args.dataset_root, args.test_batch_size, shuffle=False)
 
-print(trainset, validationset)
+# print(trainset, validationset)
 
 
 ###Create transform to display image from tensor
