@@ -89,13 +89,13 @@ class ATD12k(Dataset):
             return len(self.data_list)
             # return 1
 
-def get_loader(mode, data_root, batch_size, shuffle, num_workers, test_mode=None):
+def get_loader(mode, data_root, batch_size, shuffle, test_mode=None):
     if mode == 'train':
         is_training = True
     else:
         is_training = False
     dataset = ATD12k(data_root, is_training=is_training)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers, pin_memory=True)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, pin_memory=True)
 
 
 if __name__ == "__main__":
