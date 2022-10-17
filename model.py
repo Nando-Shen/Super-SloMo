@@ -1,361 +1,131 @@
-import torch
-import torchvision
-import torchvision.transforms as transforms
-import torch.optim as optim
+# @Time : 2021/1/22 17:53 
+
+# @Author : xx
+
+# @File : main_net.py 
+
+# @Software: PyCharm
+
+# @description=''
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
+from pwc.pwc_network import Network as flow_net
+from softsplatting import softsplat
+from softsplatting.run import backwarp
+import torch
+from other_modules import context_extractor_layer, Matric_UNet
+from gridnet.net_module import GridNet
+from pwc.utils.flow_utils import show_compare
+import cv2
 
 
-class down(nn.Module):
-    """
-    A class for creating neural network blocks containing layers:
-    
-    Average Pooling --> Convlution + Leaky ReLU --> Convolution + Leaky ReLU
-    
-    This is used in the UNet Class to create a UNet like NN architecture.
+class Main_net(nn.Module):
+    def __init__(self, shape):
+        super(Main_net, self).__init__()
 
-    ...
+        self.shape = shape
 
-    Methods
-    -------
-    forward(x)
-        Returns output tensor after passing input `x` to the neural network
-        block.
-    """
+        self.feature_extractor = context_extractor_layer()
 
+        self.flow_extractor = flow_net()
 
-    def __init__(self, inChannels, outChannels, filterSize):
-        """
-        Parameters
-        ----------
-            inChannels : int
-                number of input channels for the first convolutional layer.
-            outChannels : int
-                number of output channels for the first convolutional layer.
-                This is also used as input and output channels for the
-                second convolutional layer.
-            filterSize : int
-                filter size for the convolution filter. input N would create
-                a N x N filter.
-        """
+        self.alpha = nn.Parameter(-torch.ones(1))
 
+        self.Matric_UNet = Matric_UNet()
+        self.grid_net = GridNet()
 
-        super(down, self).__init__()
-        # Initialize convolutional layers.
-        self.conv1 = nn.Conv2d(inChannels,  outChannels, filterSize, stride=1, padding=int((filterSize - 1) / 2))
-        self.conv2 = nn.Conv2d(outChannels, outChannels, filterSize, stride=1, padding=int((filterSize - 1) / 2))
-           
-    def forward(self, x):
-        """
-        Returns output tensor after passing input `x` to the neural network
-        block.
+    def scale_flow(self, flow):
+        intHeight, intWidth = self.shape[2:]
 
-        Parameters
-        ----------
-            x : tensor
-                input to the NN block.
+        # https://github.com/sniklaus/softmax-splatting/issues/12
+        flow_scale_half = (20.0 / 2.0) * nn.functional.interpolate(input=flow,
+                                                                   size=(int(intHeight / 2), int(intWidth / 2)),
+                                                                   mode='bilinear', align_corners=False)
+        flow_scale_raw = (20.0) * nn.functional.interpolate(input=flow, size=(int(intHeight), int(intWidth)),
+                                                            mode='bilinear', align_corners=False)
+        return [flow_scale_raw, flow_scale_half, flow * (20 / 4.0)]
 
-        Returns
-        -------
-            tensor
-                output of the NN block.
-        """
+    def scale_tenMetric(self, tenMetric):
+        intHeight, intWidth = self.shape[2:]
+        tenMetric_scale_half = nn.functional.interpolate(input=tenMetric, size=(int(intHeight / 2), int(intWidth / 2)),
+                                                         mode='bilinear', align_corners=False)
+        tenMetric_scale_quarter = nn.functional.interpolate(input=tenMetric,
+                                                            size=(int(intHeight / 4), int(intWidth / 4)),
+                                                            mode='bilinear', align_corners=False)
+        return [tenMetric, tenMetric_scale_half, tenMetric_scale_quarter]
 
+    def forward(self, img1, img2):
+        feature_pyrr1 = self.feature_extractor(img1)
+        feature_pyrr2 = self.feature_extractor(img2)
 
-        # Average pooling with kernel size 2 (2 x 2).
-        x = F.avg_pool2d(x, 2)
-        # Convolution + Leaky ReLU
-        x = F.leaky_relu(self.conv1(x), negative_slope = 0.1)
-        # Convolution + Leaky ReLU
-        x = F.leaky_relu(self.conv2(x), negative_slope = 0.1)
-        return x
-    
-class up(nn.Module):
-    """
-    A class for creating neural network blocks containing layers:
-    
-    Bilinear interpolation --> Convlution + Leaky ReLU --> Convolution + Leaky ReLU
-    
-    This is used in the UNet Class to create a UNet like NN architecture.
+        flow_1to2 = self.flow_extractor(img1, img2)
 
-    ...
+        flow_1to2_pyri = self.scale_flow(flow_1to2)
 
-    Methods
-    -------
-    forward(x, skpCn)
-        Returns output tensor after passing input `x` to the neural network
-        block.
-    """
+        # show_compare(flow_1to2_pyri[0].squeeze().cpu().detach().numpy().transpose(1,2,0), flow_1to2_pyri[0].squeeze().cpu().detach().numpy().transpose(1,2,0))
+        flow_2to1 = self.flow_extractor(img2, img1)
+        flow_2to1_pyri = self.scale_flow(flow_2to1)
 
+        tenMetric_1to2 = nn.functional.l1_loss(input=img1, target=backwarp(tenInput=img2, tenFlow=flow_1to2_pyri[0]),
+                                               reduction='none').mean(1, True)
 
-    def __init__(self, inChannels, outChannels):
-        """
-        Parameters
-        ----------
-            inChannels : int
-                number of input channels for the first convolutional layer.
-            outChannels : int
-                number of output channels for the first convolutional layer.
-                This is also used for setting input and output channels for
-                the second convolutional layer.
-        """
+        tenMetric_1to2 = self.Matric_UNet(tenMetric_1to2, img1)
+        tenMetric_ls_1to2 = self.scale_tenMetric(tenMetric_1to2)
 
-        
-        super(up, self).__init__()
-        # Initialize convolutional layers.
-        self.conv1 = nn.Conv2d(inChannels,  outChannels, 3, stride=1, padding=1)
-        # (2 * outChannels) is used for accommodating skip connection.
-        self.conv2 = nn.Conv2d(2 * outChannels, outChannels, 3, stride=1, padding=1)
-           
-    def forward(self, x, skpCn):
-        """
-        Returns output tensor after passing input `x` to the neural network
-        block.
+        warped_img1 = softsplat.FunctionSoftsplat(tenInput=img1, tenFlow=flow_1to2_pyri[0] * 0.5,
+                                                  tenMetric=self.alpha * tenMetric_ls_1to2[0],
+                                                  strType='softmax')  # -20.0 is a hyperparameter, called 'beta' in the paper, that could be learned using a torch.Parameter
+        # print('beta 1',self.alpha)
+        # print('beta 2', self.beta2)
+        # warped_img1_out = warped_img1.squeeze().cpu().detach().numpy().transpose(1,2,0)
+        # cv2.imshow(warped_img1_out)
+        # cv2.waitKey(0)
+        warped_pyri1_1 = softsplat.FunctionSoftsplat(tenInput=feature_pyrr1[0], tenFlow=flow_1to2_pyri[0] * 0.5,
+                                                     tenMetric=self.alpha * tenMetric_ls_1to2[0],
+                                                     strType='softmax')
+        warped_pyri1_2 = softsplat.FunctionSoftsplat(tenInput=feature_pyrr1[1], tenFlow=flow_1to2_pyri[1] * 0.5,
+                                                     tenMetric=self.alpha * tenMetric_ls_1to2[1],
+                                                     strType='softmax')
+        warped_pyri1_3 = softsplat.FunctionSoftsplat(tenInput=feature_pyrr1[2], tenFlow=flow_1to2_pyri[2] * 0.5,
+                                                     tenMetric=self.alpha * tenMetric_ls_1to2[2],
+                                                     strType='softmax')
 
-        Parameters
-        ----------
-            x : tensor
-                input to the NN block.
-            skpCn : tensor
-                skip connection input to the NN block.
+        tenMetric_2to1 = nn.functional.l1_loss(input=img2, target=backwarp(tenInput=img1, tenFlow=flow_2to1_pyri[0]),
+                                               reduction='none').mean(1, True)
+        tenMetric_2to1 = self.Matric_UNet(tenMetric_2to1, img2)
+        tenMetric_ls_2to1 = self.scale_tenMetric(tenMetric_2to1)
 
-        Returns
-        -------
-            tensor
-                output of the NN block.
-        """
+        warped_img2 = softsplat.FunctionSoftsplat(tenInput=img2, tenFlow=flow_2to1_pyri[0] * 0.5,
+                                                  tenMetric=self.alpha * tenMetric_ls_2to1[0],
+                                                  strType='softmax')  # -20.0 is a hyperparameter, called 'beta' in the paper, that could be learned using a torch.Parameter
 
-        # Bilinear interpolation with scaling 2.
-        x = F.interpolate(x, scale_factor=2, mode='bilinear')
-        # Convolution + Leaky ReLU
-        x = F.leaky_relu(self.conv1(x), negative_slope = 0.1)
-        # Convolution + Leaky ReLU on (`x`, `skpCn`)
-        x = F.leaky_relu(self.conv2(torch.cat((x, skpCn), 1)), negative_slope = 0.1)
-        return x
+        warped_pyri2_1 = softsplat.FunctionSoftsplat(tenInput=feature_pyrr2[0], tenFlow=flow_2to1_pyri[0] * 0.5,
+                                                     tenMetric=self.alpha * tenMetric_ls_2to1[0],
+                                                     strType='softmax')
+        warped_pyri2_2 = softsplat.FunctionSoftsplat(tenInput=feature_pyrr2[1], tenFlow=flow_2to1_pyri[1] * 0.5,
+                                                     tenMetric=self.alpha * tenMetric_ls_2to1[1],
+                                                     strType='softmax')
+        warped_pyri2_3 = softsplat.FunctionSoftsplat(tenInput=feature_pyrr2[2], tenFlow=flow_2to1_pyri[2] * 0.5,
+                                                     tenMetric=self.alpha * tenMetric_ls_2to1[2],
+                                                     strType='softmax')
+        grid_input_l1 = torch.cat([warped_img1, warped_pyri1_1, warped_img2, warped_pyri2_1], dim=1)
+
+        grid_input_l2 = torch.cat([warped_pyri1_2, warped_pyri2_2], dim=1)
+
+        grid_input_l3 = torch.cat([warped_pyri1_3, warped_pyri2_3], dim=1)
+
+        out = self.grid_net(grid_input_l1, grid_input_l2, grid_input_l3)
+
+        return out
 
 
+if __name__ == '__main__':
+    W = 448
+    H = 256
+    N = 1
+    tenFirst = torch.rand(size=(N, 3, H, W)).cuda()
+    tenSecond = torch.rand(size=(N, 3, H, W)).cuda()
 
-class UNet(nn.Module):
-    """
-    A class for creating UNet like architecture as specified by the
-    Super SloMo paper.
-    
-    ...
+    model = Main_net(tenFirst.shape).cuda()
 
-    Methods
-    -------
-    forward(x)
-        Returns output tensor after passing input `x` to the neural network
-        block.
-    """
-
-
-    def __init__(self, inChannels, outChannels):
-        """
-        Parameters
-        ----------
-            inChannels : int
-                number of input channels for the UNet.
-            outChannels : int
-                number of output channels for the UNet.
-        """
-
-        
-        super(UNet, self).__init__()
-        # Initialize neural network blocks.
-        self.conv1 = nn.Conv2d(inChannels, 32, 7, stride=1, padding=3)
-        self.conv2 = nn.Conv2d(32, 32, 7, stride=1, padding=3)
-        self.down1 = down(32, 64, 5)
-        self.down2 = down(64, 128, 3)
-        self.down3 = down(128, 256, 3)
-        self.down4 = down(256, 512, 3)
-        self.down5 = down(512, 512, 3)
-        self.up1   = up(512, 512)
-        self.up2   = up(512, 256)
-        self.up3   = up(256, 128)
-        self.up4   = up(128, 64)
-        self.up5   = up(64, 32)
-        self.conv3 = nn.Conv2d(32, outChannels, 3, stride=1, padding=1)
-        
-    def forward(self, x):
-        """
-        Returns output tensor after passing input `x` to the neural network.
-
-        Parameters
-        ----------
-            x : tensor
-                input to the UNet.
-
-        Returns
-        -------
-            tensor
-                output of the UNet.
-        """
-
-
-        x  = F.leaky_relu(self.conv1(x), negative_slope = 0.1)
-        s1 = F.leaky_relu(self.conv2(x), negative_slope = 0.1)
-        s2 = self.down1(s1)
-        s3 = self.down2(s2)
-        s4 = self.down3(s3)
-        s5 = self.down4(s4)
-        x  = self.down5(s5)
-        x  = self.up1(x, s5)
-        x  = self.up2(x, s4)
-        x  = self.up3(x, s3)
-        x  = self.up4(x, s2)
-        x  = self.up5(x, s1)
-        x  = F.leaky_relu(self.conv3(x), negative_slope = 0.1)
-        return x
-
-
-class backWarp(nn.Module):
-    """
-    A class for creating a backwarping object.
-
-    This is used for backwarping to an image:
-
-    Given optical flow from frame I0 to I1 --> F_0_1 and frame I1, 
-    it generates I0 <-- backwarp(F_0_1, I1).
-
-    ...
-
-    Methods
-    -------
-    forward(x)
-        Returns output tensor after passing input `img` and `flow` to the backwarping
-        block.
-    """
-
-
-    def __init__(self, W, H, device):
-        """
-        Parameters
-        ----------
-            W : int
-                width of the image.
-            H : int
-                height of the image.
-            device : device
-                computation device (cpu/cuda). 
-        """
-
-
-        super(backWarp, self).__init__()
-        # create a grid
-        gridX, gridY = np.meshgrid(np.arange(W), np.arange(H))
-        self.W = W
-        self.H = H
-        self.gridX = torch.tensor(gridX, requires_grad=False, device=device)
-        self.gridY = torch.tensor(gridY, requires_grad=False, device=device)
-        
-    def forward(self, img, flow):
-        """
-        Returns output tensor after passing input `img` and `flow` to the backwarping
-        block.
-        I0  = backwarp(I1, F_0_1)
-
-        Parameters
-        ----------
-            img : tensor
-                frame I1.
-            flow : tensor
-                optical flow from I0 and I1: F_0_1.
-
-        Returns
-        -------
-            tensor
-                frame I0.
-        """
-
-
-        # Extract horizontal and vertical flows.
-        u = flow[:, 0, :, :]
-        v = flow[:, 1, :, :]
-        x = self.gridX.unsqueeze(0).expand_as(u).float() + u
-        y = self.gridY.unsqueeze(0).expand_as(v).float() + v
-        # range -1 to 1
-        x = 2*(x/self.W - 0.5)
-        y = 2*(y/self.H - 0.5)
-        # stacking X and Y
-        grid = torch.stack((x,y), dim=3)
-        # Sample pixels using bilinear interpolation.
-        imgOut = torch.nn.functional.grid_sample(img, grid)
-        return imgOut
-
-
-# Creating an array of `t` values for the 7 intermediate frames between
-# reference frames I0 and I1. 
-t = np.linspace(0.125, 0.875, 7)
-
-def getFlowCoeff (indices, device):
-    """
-    Gets flow coefficients used for calculating intermediate optical
-    flows from optical flows between I0 and I1: F_0_1 and F_1_0.
-
-    F_t_0 = C00 x F_0_1 + C01 x F_1_0
-    F_t_1 = C10 x F_0_1 + C11 x F_1_0
-
-    where,
-    C00 = -(1 - t) x t
-    C01 = t x t
-    C10 = (1 - t) x (1 - t)
-    C11 = -t x (1 - t)
-
-    Parameters
-    ----------
-        indices : tensor
-            indices corresponding to the intermediate frame positions
-            of all samples in the batch.
-        device : device
-                computation device (cpu/cuda). 
-
-    Returns
-    -------
-        tensor
-            coefficients C00, C01, C10, C11.
-    """
-
-
-    # Convert indices tensor to numpy array
-    ind = indices.detach().numpy()
-    C11 = C00 = - (1 - (t[ind])) * (t[ind])
-    C01 = (t[ind]) * (t[ind])
-    C10 = (1 - (t[ind])) * (1 - (t[ind]))
-    return torch.Tensor(C00)[None, None, None, :].permute(3, 0, 1, 2).to(device), torch.Tensor(C01)[None, None, None, :].permute(3, 0, 1, 2).to(device), torch.Tensor(C10)[None, None, None, :].permute(3, 0, 1, 2).to(device), torch.Tensor(C11)[None, None, None, :].permute(3, 0, 1, 2).to(device)
-
-def getWarpCoeff (indices, device):
-    """
-    Gets coefficients used for calculating final intermediate 
-    frame `It_gen` from backwarped images using flows F_t_0 and F_t_1.
-
-    It_gen = (C0 x V_t_0 x g_I_0_F_t_0 + C1 x V_t_1 x g_I_1_F_t_1) / (C0 x V_t_0 + C1 x V_t_1)
-
-    where,
-    C0 = 1 - t
-    C1 = t
-
-    V_t_0, V_t_1 --> visibility maps
-    g_I_0_F_t_0, g_I_1_F_t_1 --> backwarped intermediate frames
-
-    Parameters
-    ----------
-        indices : tensor
-            indices corresponding to the intermediate frame positions
-            of all samples in the batch.
-        device : device
-                computation device (cpu/cuda). 
-
-    Returns
-    -------
-        tensor
-            coefficients C0 and C1.
-    """
-
-
-    # Convert indices tensor to numpy array
-    ind = indices.detach().numpy()
-    C0 = 1 - t[ind]
-    C1 = t[ind]
-    return torch.Tensor(C0)[None, None, None, :].permute(3, 0, 1, 2).to(device), torch.Tensor(C1)[None, None, None, :].permute(3, 0, 1, 2).to(device)
+    res = model(tenFirst, tenSecond)
+    print(res.shape)
