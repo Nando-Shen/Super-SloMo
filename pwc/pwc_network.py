@@ -284,7 +284,7 @@ class Network(torch.nn.Module):
 		# print('http://content.sniklaus.com/github/pytorch-pwc/network-' + arguments_strModel + '.pytorch')
 		#不清楚为啥 不能load 似乎只会起反作用，应该是估计的光流没有起到很好的效果？？？
 		#看来输入的光流必须除以255否则不顶用 这根预训练模型绝对有关系
-		# self.load_state_dict({ strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.load('pwc/weights/network-default.pytorch').items()})
+		self.load_state_dict({ strKey.replace('module', 'net'): tenWeight for strKey, tenWeight in torch.load('pwc/weights/network-default.pytorch').items()})
 	# end
 
 	def forward(self, tenFirst, tenSecond):
