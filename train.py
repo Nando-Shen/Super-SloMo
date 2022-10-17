@@ -51,9 +51,9 @@ ArbTimeFlowIntrp.to(device)
 ###Initialze backward warpers for train and validation datasets
 
 
-trainFlowBackWarp      = model.backWarp(352, 352, device)
+trainFlowBackWarp      = model.backWarp(288, 512, device)
 trainFlowBackWarp      = trainFlowBackWarp.to(device)
-validationFlowBackWarp = model.backWarp(640, 352, device)
+validationFlowBackWarp = model.backWarp(288, 512, device)
 validationFlowBackWarp = validationFlowBackWarp.to(device)
 
 
