@@ -74,8 +74,8 @@ transform = transforms.Compose([transforms.ToTensor(), normalize])
 # validationloader = torch.utils.data.DataLoader(validationset, batch_size=args.validation_batch_size, shuffle=False)
 
 from data.atd12k import get_loader
-trainloader = get_loader('train', args.dataset_root, args.batch_size, shuffle=True)
-validationloader = get_loader('test', args.dataset_root, args.test_batch_size, shuffle=False)
+trainloader = get_loader('train', args.dataset_root, args.train_batch_size, shuffle=True)
+validationloader = get_loader('test', args.dataset_root, args.validation_batch_size, shuffle=False)
 
 # print(trainset, validationset)
 
