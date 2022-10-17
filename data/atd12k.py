@@ -30,14 +30,13 @@ class ATD12k(Dataset):
             img0 = os.path.join(self.data_root, d, 'frame1.jpg')
             img1 = os.path.join(self.data_root, d, 'frame3.jpg')
             gt = os.path.join(self.data_root, d, 'frame2.jpg')
-            points = os.path.join(self.data_root, d, 'inter.jpg')
-            data_list.append([img0, img1, gt, points, d])
+            data_list.append([img0, gt, img1, d])
 
         self.data_list = data_list
 
         if self.training:
             self.transforms = transforms.Compose([
-                transforms.RandomCrop(228),
+                # transforms.RandomCrop(228),
                 transforms.RandomHorizontalFlip(),
                 # transforms.ColorJitter(0.05, 0.05, 0.05, 0.05),
                 transforms.ToTensor()
@@ -68,19 +67,16 @@ class ATD12k(Dataset):
                 images_.append(self.transforms(img_))
             images = images_
 
-            gt = images[2]
-            images = images[:2]
+            images = images[:3]
 
-            return images, gt
+            return images
         else:
             T = self.transforms
             images = [T(img_) for img_ in images]
 
-            gt = images[2]
-            images = images[:2]
-            imgpath = self.data_list[index][4]
+            images = images[:3]
 
-            return images, gt, imgpath
+            return images
 
     def __len__(self):
         if self.training:

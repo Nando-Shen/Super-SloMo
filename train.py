@@ -223,8 +223,7 @@ for epoch in range(dict1['epoch'] + 1, args.epochs):
     iLoss = 0
     
     # Increment scheduler count    
-    scheduler.step()
-    
+
     for trainIndex, (trainData, trainFrameIndex) in enumerate(trainloader, 0):
         
 		## Getting the input and the target from the training set
@@ -290,6 +289,7 @@ for epoch in range(dict1['epoch'] + 1, args.epochs):
         # Backpropagate
         loss.backward()
         optimizer.step()
+        scheduler.step()
         iLoss += loss.item()
                
         # Validation and progress every `args.progress_iter` iterations
