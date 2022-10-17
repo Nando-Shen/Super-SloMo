@@ -14,6 +14,7 @@ import dataloader
 from math import log10
 import datetime
 from tensorboardX import SummaryWriter
+from utils.pytorch_msssim import ssim_matlab
 
 
 # For parsing commandline arguments
@@ -125,6 +126,7 @@ for param in vgg16_conv_4_3.parameters():
 def validate():
     # For details see training.
     psnr = 0
+    ssim = 0
     tloss = 0
     flag = 1
     with torch.no_grad():
@@ -186,8 +188,12 @@ def validate():
             #psnr
             MSE_val = MSE_LossFn(Ft_p, IFrame)
             psnr += (10 * log10(1 / MSE_val.item()))
+
+            #ssim
+            ssim += ssim_matlab(IFrame.unsqueeze(0).clamp(0, 1), Ft_p.unsqueeze(0).clamp(0, 1), val_range=1.)
+
             
-    return (psnr / len(validationloader)), (tloss / len(validationloader)), retImg
+    return (psnr / len(validationloader)), (ssim / len(validationloader)), (tloss / len(validationloader)), retImg
 
 
 ### Initialization
@@ -198,7 +204,7 @@ if args.train_continue:
     ArbTimeFlowIntrp.load_state_dict(dict1['state_dictAT'])
     flowComp.load_state_dict(dict1['state_dictFC'])
 else:
-    dict1 = {'loss': [], 'valLoss': [], 'valPSNR': [], 'epoch': -1}
+    dict1 = {'loss': [], 'valLoss': [], 'valPSNR': [], 'valSSIM': [], 'epoch': -1}
 
 
 ### Training
@@ -210,6 +216,7 @@ start = time.time()
 cLoss   = dict1['loss']
 valLoss = dict1['valLoss']
 valPSNR = dict1['valPSNR']
+valSSIM = dict1['valSSIM']
 checkpoint_counter = 0
 
 ### Main training loop
@@ -220,6 +227,7 @@ for epoch in range(dict1['epoch'] + 1, args.epochs):
     cLoss.append([])
     valLoss.append([])
     valPSNR.append([])
+    valSSIM.append([])
     iLoss = 0
     
     # Increment scheduler count    
@@ -296,9 +304,10 @@ for epoch in range(dict1['epoch'] + 1, args.epochs):
         if ((trainIndex % args.progress_iter) == args.progress_iter - 1):
             end = time.time()
             
-            psnr, vLoss, valImg = validate()
+            psnr, ssim, vLoss, valImg = validate()
             
             valPSNR[epoch].append(psnr)
+            valSSIM[epoch].append(ssim)
             valLoss[epoch].append(vLoss)
             
             #Tensorboard
@@ -307,15 +316,15 @@ for epoch in range(dict1['epoch'] + 1, args.epochs):
             writer.add_scalars('Loss', {'trainLoss': iLoss/args.progress_iter,
                                         'validationLoss': vLoss}, itr)
             writer.add_scalar('PSNR', psnr, itr)
-            
+            writer.add_scalar('SSMI', ssim, itr)
+
             writer.add_image('Validation',valImg , itr)
             #####
             
             endVal = time.time()
             
-            print(" Loss: %0.6f  Iterations: %4d/%4d  TrainExecTime: %0.1f  ValLoss:%0.6f  ValPSNR: %0.4f  ValEvalTime: %0.2f LearningRate: %f" % (iLoss / args.progress_iter, trainIndex, len(trainloader), end - start, vLoss, psnr, endVal - end, get_lr(optimizer)))
-            
-            
+            print(" Loss: %0.6f  Iterations: %4d/%4d  TrainExecTime: %0.1f  ValLoss:%0.6f  ValPSNR: %0.4f ValSSIM: %0.4f  ValEvalTime: %0.2f LearningRate: %f" % (iLoss / args.progress_iter, trainIndex, len(trainloader), end - start, vLoss, psnr, ssim, endVal - end, get_lr(optimizer)))
+
             cLoss[epoch].append(iLoss/args.progress_iter)
             iLoss = 0
             start = time.time()
@@ -332,6 +341,7 @@ for epoch in range(dict1['epoch'] + 1, args.epochs):
                 'loss':cLoss,
                 'valLoss':valLoss,
                 'valPSNR':valPSNR,
+                'valSSIM': valSSIM,
                 'state_dictFC': flowComp.state_dict(),
                 'state_dictAT': ArbTimeFlowIntrp.state_dict(),
                 }
