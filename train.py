@@ -199,9 +199,9 @@ def validate():
 
             for idx in range(Ft_p.size()[0]):
                 # print(idx)
-                print(datapath[idx])
-                # os.makedirs(args.result_dir + '/' + datapath[idx])
-                # imwrite(Ft_p[idx], args.result_dir + '/' + datapath[idx] + '/superslow.png')
+                # print(datapath[idx])
+                os.makedirs(args.result_dir + '/' + datapath[idx])
+                imwrite(Ft_p[idx], args.result_dir + '/' + datapath[idx] + '/superslow.png')
 
             
     return (psnr / len(validationloader)), (ssim / len(validationloader)), (tloss / len(validationloader)), retImg
@@ -230,7 +230,8 @@ valPSNR = dict1['valPSNR']
 valSSIM = dict1['valSSIM']
 checkpoint_counter = 0
 
-validate()
+psnr, ssim, vLoss, valImg = validate()
+print(" ValPSNR: %0.4f ValSSIM: %0.4f  " % ( psnr, ssim))
 
 ### Main training loop
 # for epoch in range(dict1['epoch'] + 1, args.epochs):
