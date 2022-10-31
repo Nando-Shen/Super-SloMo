@@ -76,7 +76,7 @@ class ATD12k(Dataset):
 
             images = images[:3]
 
-            return images, 3
+            return images, 3, self.data_list[index][3]
 
     def __len__(self):
         if self.training:
